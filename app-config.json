@@ -1,0 +1,12 @@
+{
+    "title": "ChatGPT Dumper",
+    "emoji": "📥",
+    "colorFrom": "blue",
+    "colorTo": "orange",
+    "sdk": "gradio",
+    "sdk_version": "3.50.0",
+    "python_version": "3.9",
+    "dockerfile_path": "Dockerfile",
+    "app_file": "app.py",
+    "pinned": false
+}

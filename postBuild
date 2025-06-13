@@ -1,0 +1,121 @@
+#!/bin/bash
+set -e
+
+echo "Running post-build setup for ChatGPT Dumper on Hugging Face Spaces..."
+
+# ติดตั้ง dependencies ที่จำเป็นสำหรับ Playwright
+echo "Installing system dependencies..."
+
+# อัปเดต package lists
+apt-get update -y
+
+# ติดตั้ง dependencies ผ่าน apt-get โดยไม่ใช้ sudo
+apt-get install -y --no-install-recommends \
+    chromium \
+    chromium-browser \
+    xvfb \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libatspi2.0-0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libcairo-gobject2 \
+    libasound2 \
+    libxshmfence1 \
+    libcups2 \
+    fonts-liberation \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libxss1 \
+    libxtst6 \
+    xdg-utils
+
+# ตรวจสอบว่า xvfb ติดตั้งสำเร็จ
+if ! command -v Xvfb &> /dev/null; then
+    echo "ERROR: Xvfb not installed properly"
+    which Xvfb || echo "Xvfb not found in PATH"
+    ls -la /usr/bin/Xvfb || echo "Xvfb not found in /usr/bin/"
+    exit 1
+fi
+
+echo "Xvfb installation verified: $(which Xvfb)"
+
+# สร้างโครงสร้างไดเรกทอรีที่จำเป็น
+mkdir -p ~/.cache/ms-playwright
+chmod -R 777 ~/.cache/ms-playwright
+
+# ตั้งค่า environment variables
+export PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+export DISPLAY=:0
+
+# บันทึก environment variables
+cat << EOF >> ~/.bashrc
+export PLAYWRIGHT_BROWSERS_PATH=~/.cache/ms-playwright
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+export DISPLAY=:0
+EOF
+
+# ตรวจสอบ Chromium path
+if [ -f "/usr/bin/chromium" ]; then
+    CHROMIUM_PATH="/usr/bin/chromium"
+elif [ -f "/usr/bin/chromium-browser" ]; then
+    CHROMIUM_PATH="/usr/bin/chromium-browser"
+else
+    echo "Error: Chromium not found!"
+    exit 1
+fi
+
+echo "Found Chromium at: $CHROMIUM_PATH"
+
+# ตั้งค่า Chromium path
+export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="$CHROMIUM_PATH"
+echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$CHROMIUM_PATH" >> ~/.bashrc
+
+# ติดตั้ง dependencies ผ่าน pip
+python -m pip install --upgrade pip
+python -m pip install playwright
+python -m playwright install chromium
+python -m playwright install-deps chromium
+
+# ตรวจสอบการติดตั้ง
+if [ ! -f "$CHROMIUM_PATH" ]; then
+    echo "Error: Chromium installation failed!"
+    exit 1
+fi
+
+# ตั้งค่าสิทธิ์การเข้าถึง
+chmod -R 777 ~/.cache/ms-playwright
+chmod +x "$CHROMIUM_PATH"
+
+echo "Post-build setup completed!"
+
+# สร้าง Xvfb virtual display และเก็บ process ไว้
+echo "Starting Xvfb virtual display..."
+Xvfb :0 -screen 0 1280x1024x24 -ac +extension RANDR +render -noreset > /dev/null 2>&1 &
+XVFB_PID=$!
+
+# ให้เวลา Xvfb เริ่มทำงาน
+sleep 3
+
+# ตรวจสอบว่า Xvfb ทำงานอยู่
+if ! kill -0 $XVFB_PID 2>/dev/null; then
+    echo "Warning: Xvfb may not have started properly"
+else
+    echo "Xvfb started successfully with PID $XVFB_PID"
+fi
+
+# บันทึก PID เพื่อใช้ในภายหลัง
+echo $XVFB_PID > /tmp/xvfb.pid
+
+echo "Virtual display setup completed!"
+
