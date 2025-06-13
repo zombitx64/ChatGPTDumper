@@ -570,7 +570,7 @@ iface = gr.Interface(
     ],
     title="📥 ChatGPT Dumper",
     description="""<div style="text-align: center; margin-bottom: 10px">
-                 <h3>เครื่องมือดึงและบันทึกบทสนทนา ChatGPT รองรับหลายรูปแบบไฟล์ พร้อมภาษาไทย</h3>
+                 <h3>Extract and save ChatGPT conversations in multiple formats with Unicode support</h3>
                  <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                      <span class="format-badge">📄 TXT</span>
                      <span class="format-badge">📋 JSON</span>
