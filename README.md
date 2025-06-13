@@ -108,8 +108,7 @@ docker run -p 7860:7860 chatgpt-dumper
 
 ## เครดิต
 
-- ผู้พัฒนา: [github.com/yourname](https://github.com/yourname)
-- License: MIT
+- ผู้พัฒนา: [github.com/JonusNattapong](https://github.com/JonusNattapong)
 
 ---
 
