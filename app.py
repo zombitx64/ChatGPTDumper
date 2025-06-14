@@ -510,7 +510,8 @@ async def extract_chats(url):
             await page.goto(url)
             await page.wait_for_selector('[data-message-author-role]')
             chat_blocks = await page.query_selector_all('[data-message-author-role]')
-            messages = []            for block in chat_blocks:
+            messages = []            
+            for block in chat_blocks:
                 role = clean_role(await block.get_attribute("data-message-author-role"))
                 content = (await block.inner_text()).strip()
                 
