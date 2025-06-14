@@ -5,7 +5,7 @@ import os
 import sys
 import subprocess
 import platform
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import requests
 import re
@@ -75,6 +75,107 @@ if is_on_spaces:
 # ตัวแปรแสดงว่ากำลังใช้ fallback mode หรือไม่
 USE_FALLBACK = False
 
+def convert_html_to_markdown(html_content):
+    """แปลง HTML เป็น Markdown format โดยคงรูปแบบโค้ดและตารางไว้"""
+    if not html_content:
+        return html_content
+    
+    # แก้ไขปัญหา \r\n ก่อนอื่น
+    html_content = html_content.replace('\r\n', '\n').replace('\r', '\n')
+    
+    # แปลงโค้ดบล็อก
+    html_content = re.sub(
+        r'<pre[^>]*><code[^>]*class="language-(\w+)"[^>]*>(.*?)</code></pre>',
+        r'```\1\n\2\n```',
+        html_content,
+        flags=re.DOTALL
+    )
+    
+    html_content = re.sub(
+        r'<pre[^>]*><code[^>]*>(.*?)</code></pre>',
+        r'```\n\1\n```',
+        html_content,
+        flags=re.DOTALL
+    )
+    
+    html_content = re.sub(
+        r'<pre[^>]*>(.*?)</pre>',
+        r'```\n\1\n```',
+        html_content,
+        flags=re.DOTALL
+    )
+    
+    # แปลงโค้ด inline
+    html_content = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', html_content)
+    
+    # แปลงตาราง
+    def convert_table(match):
+        table_html = match.group(0)
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL)
+        
+        if not rows:
+            return table_html
+        
+        markdown_table = '\n'
+        for i, row in enumerate(rows):
+            cells = re.findall(r'<t[hd][^>]*>(.*?)</t[hd]>', row, re.DOTALL)
+            if cells:
+                # ทำความสะอาดเนื้อหาใน cell
+                clean_cells = []
+                for cell in cells:
+                    cell_text = re.sub(r'<[^>]*>', '', cell).strip()
+                    clean_cells.append(cell_text)
+                
+                markdown_table += '| ' + ' | '.join(clean_cells) + ' |\n'
+                
+                # เพิ่ม separator หลังแถวแรก
+                if i == 0:
+                    markdown_table += '|' + ' --- |' * len(clean_cells) + '\n'
+        
+        return markdown_table + '\n'
+    
+    html_content = re.sub(r'<table[^>]*>.*?</table>', convert_table, html_content, flags=re.DOTALL)
+    
+    # แปลงรายการ
+    html_content = re.sub(r'<ul[^>]*>(.*?)</ul>', lambda m: convert_list(m.group(1), '- '), html_content, flags=re.DOTALL)
+    html_content = re.sub(r'<ol[^>]*>(.*?)</ol>', lambda m: convert_list(m.group(1), '1. '), html_content, flags=re.DOTALL)
+    
+    # แปลงลิงก์
+    html_content = re.sub(r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r'[\2](\1)', html_content)
+    
+    # แปลงตัวหนา/เอียง
+    html_content = re.sub(r'<(strong|b)[^>]*>(.*?)</\1>', r'**\2**', html_content)
+    html_content = re.sub(r'<(em|i)[^>]*>(.*?)</\1>', r'*\2*', html_content)
+    
+    # แปลงหัวข้อ
+    for i in range(1, 7):
+        html_content = re.sub(f'<h{i}[^>]*>(.*?)</h{i}>', f'\n{"#" * i} \\1\n', html_content)
+    
+    # แปลงบรรทัดใหม่
+    html_content = re.sub(r'<br[^>]*>', '\n', html_content)
+    html_content = re.sub(r'<p[^>]*>(.*?)</p>', r'\1\n\n', html_content, flags=re.DOTALL)
+    
+    # ลบ HTML tags ที่เหลือ
+    html_content = re.sub(r'<[^>]*>', '', html_content)
+    
+    # ทำความสะอาด HTML entities
+    html_content = html_content.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+    html_content = html_content.replace('&quot;', '"').replace('&#x27;', "'")
+    
+    return html_content
+
+def convert_list(list_content, prefix):
+    """แปลงรายการ HTML เป็น Markdown"""
+    items = re.findall(r'<li[^>]*>(.*?)</li>', list_content, re.DOTALL)
+    result = '\n'
+    for i, item in enumerate(items):
+        item_text = re.sub(r'<[^>]*>', '', item).strip()
+        if prefix == '1. ':
+            result += f'{i + 1}. {item_text}\n'
+        else:
+            result += f'{prefix}{item_text}\n'
+    return result + '\n'
+
 # เพิ่มฟังก์ชันสำรองใช้ requests แทน Playwright
 def extract_chats_with_requests(url):
     print("กำลังใช้โหมดสำรอง (Requests) แทน Playwright...")
@@ -97,12 +198,11 @@ def extract_chats_with_requests(url):
         
         # หา messages ด้วย regex
         user_matches = re.findall(user_pattern, response.text, re.DOTALL)
-        assistant_matches = re.findall(assistant_pattern, response.text, re.DOTALL)
-          # สร้าง messages แบบสลับกัน user และ assistant
+        assistant_matches = re.findall(assistant_pattern, response.text, re.DOTALL)        # สร้าง messages แบบสลับกัน user และ assistant
         for i in range(max(len(user_matches), len(assistant_matches))):
             if i < len(user_matches):
-                # ลบ html tags และทำความสะอาด
-                content = re.sub(r'<[^>]*>', '', user_matches[i])
+                # แปลง HTML เป็น markdown format สำหรับโค้ดและตาราง
+                content = convert_html_to_markdown(user_matches[i])
                 content = clean_content(content)
                 if content.strip():
                     messages.append({
@@ -112,8 +212,8 @@ def extract_chats_with_requests(url):
                     })
             
             if i < len(assistant_matches):
-                # ลบ html tags และทำความสะอาด
-                content = re.sub(r'<[^>]*>', '', assistant_matches[i])
+                # แปลง HTML เป็น markdown format สำหรับโค้ดและตาราง
+                content = convert_html_to_markdown(assistant_matches[i])
                 content = clean_content(content)
                 if content.strip():
                     messages.append({
@@ -166,6 +266,115 @@ def extract_chats_with_requests(url):
         print(f"เกิดข้อผิดพลาดในการดึงข้อมูลด้วย Requests: {str(e)}")
         traceback.print_exc()
         return []
+
+async def extract_formatted_content(page, element):
+    """ดึงเนื้อหาแบบคงรูปแบบ รวมโค้ดและตาราง"""
+    try:
+        # ดึง HTML ของ element
+        html_content = await element.inner_html()
+        
+        # แปลง HTML เป็น text แต่คงรูปแบบโค้ดและตาราง
+        formatted_content = await page.evaluate('''(html) => {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            
+            // แปลงโค้ดบล็อก
+            const codeBlocks = tempDiv.querySelectorAll('pre code, pre, code');
+            codeBlocks.forEach(block => {
+                const isBlock = block.tagName === 'PRE' || block.parentElement?.tagName === 'PRE';
+                const language = block.className.match(/language-(\w+)/) ? 
+                    block.className.match(/language-(\w+)/)[1] : '';
+                
+                if (isBlock) {
+                    // โค้ดบล็อก
+                    const codeText = block.textContent || block.innerText;
+                    block.outerHTML = language ? 
+                        `\n\`\`\`${language}\n${codeText}\n\`\`\`\n` : 
+                        `\n\`\`\`\n${codeText}\n\`\`\`\n`;
+                } else {
+                    // โค้ด inline
+                    const codeText = block.textContent || block.innerText;
+                    block.outerHTML = `\`${codeText}\``;
+                }
+            });
+            
+            // แปลงตาราง
+            const tables = tempDiv.querySelectorAll('table');
+            tables.forEach(table => {
+                let markdownTable = '\n';
+                const rows = table.querySelectorAll('tr');
+                
+                rows.forEach((row, rowIndex) => {
+                    const cells = row.querySelectorAll('td, th');
+                    const cellTexts = Array.from(cells).map(cell => 
+                        (cell.textContent || cell.innerText).trim()
+                    );
+                    markdownTable += '| ' + cellTexts.join(' | ') + ' |\n';
+                    
+                    // เพิ่ม separator หลังแถวหัว
+                    if (rowIndex === 0 && cells.length > 0) {
+                        markdownTable += '|' + ' --- |'.repeat(cells.length) + '\n';
+                    }
+                });
+                
+                table.outerHTML = markdownTable + '\n';
+            });
+            
+            // แปลงรายการ (lists)
+            const lists = tempDiv.querySelectorAll('ul, ol');
+            lists.forEach(list => {
+                const items = list.querySelectorAll('li');
+                let listText = '\n';
+                items.forEach((item, index) => {
+                    const prefix = list.tagName === 'UL' ? '- ' : `${index + 1}. `;
+                    listText += prefix + (item.textContent || item.innerText).trim() + '\n';
+                });
+                list.outerHTML = listText + '\n';
+            });
+            
+            // แปลงลิงก์
+            const links = tempDiv.querySelectorAll('a');
+            links.forEach(link => {
+                const href = link.getAttribute('href');
+                const text = link.textContent || link.innerText;
+                if (href && href !== text) {
+                    link.outerHTML = `[${text}](${href})`;
+                } else {
+                    link.outerHTML = text;
+                }
+            });
+            
+            // แปลงตัวหนา/เอียง
+            const bolds = tempDiv.querySelectorAll('strong, b');
+            bolds.forEach(bold => {
+                const text = bold.textContent || bold.innerText;
+                bold.outerHTML = `**${text}**`;
+            });
+            
+            const italics = tempDiv.querySelectorAll('em, i');
+            italics.forEach(italic => {
+                const text = italic.textContent || italic.innerText;
+                italic.outerHTML = `*${text}*`;
+            });
+            
+            // แปลงหัวข้อ
+            const headings = tempDiv.querySelectorAll('h1, h2, h3, h4, h5, h6');
+            headings.forEach(heading => {
+                const level = parseInt(heading.tagName.substring(1));
+                const text = heading.textContent || heading.innerText;
+                const hashes = '#'.repeat(level);
+                heading.outerHTML = `\n${hashes} ${text}\n`;
+            });
+            
+            return tempDiv.textContent || tempDiv.innerText || '';
+        }''', html_content)
+        
+        return formatted_content.strip()
+        
+    except Exception as e:
+        print(f"Error extracting formatted content: {e}")
+        # fallback ไปใช้ inner_text ธรรมดา
+        return await element.inner_text()
 
 # ตรวจสอบระบบปฏิบัติการ
 is_linux = platform.system() == "Linux"
@@ -253,60 +462,97 @@ def clean_role(role):
     return role
 
 def clean_emoji(text):
-    """ฟังก์ชันลบ emoji และสัญลักษณ์พิเศษออกจากข้อความ"""
+    """ฟังก์ชันลบ emoji และสัญลักษณ์พิเศษออกจากข้อความ แต่เก็บข้อความภาษาไทยและอังกฤษไว้"""
     if not text:
         return text
     
-    # ลบ emoji ด้วย regex pattern
+    # ลบ emoji ด้วย regex pattern (รุนแรงน้อยลง)
     emoji_pattern = re.compile("["
         u"\U0001F600-\U0001F64F"  # emoticons
         u"\U0001F300-\U0001F5FF"  # symbols & pictographs
         u"\U0001F680-\U0001F6FF"  # transport & map symbols
         u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        u"\U00002500-\U00002BEF"  # chinese char
-        u"\U00002702-\U000027B0"
-        u"\U00002702-\U000027B0"
-        u"\U000024C2-\U0001F251"
         u"\U0001f926-\U0001f937"
-        u"\U00010000-\U0010ffff"
-        u"\u2640-\u2642" 
-        u"\u2600-\u2B55"
+        u"\U00002640-\u2642" 
+        u"\U00002600-\U000027BF"
         u"\u200d"
-        u"\u23cf"
-        u"\u23e9"
-        u"\u231a"
         u"\ufe0f"  # dingbats
-        u"\u3030"
         "]+", flags=re.UNICODE)
     
     # ลบ emoji
     cleaned_text = emoji_pattern.sub(r'', text)
     
-    # ลบช่องว่างเกิน
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-    
-    # ลบอักขระควบคุมพิเศษ
-    cleaned_text = ''.join(char for char in cleaned_text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
+    # ลบช่องว่างเกิน แต่เก็บบรรทัดใหม่ไว้
+    cleaned_text = re.sub(r'[ \t]+', ' ', cleaned_text)
+    cleaned_text = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned_text)
+    cleaned_text = cleaned_text.strip()
     
     return cleaned_text
 
 def clean_content(content):
-    """ทำความสะอาดเนื้อหาข้อความ"""
+    """ทำความสะอาดเนื้อหาข้อความ โดยคงรูปแบบโค้ดและตารางไว้"""
     if not content:
         return content
+    
+    # แก้ไขปัญหา \r\n ให้เป็น \n ปกติ
+    content = content.replace('\r\n', '\n').replace('\r', '\n')
     
     # ลบ emoji
     content = clean_emoji(content)
     
-    # ลบ HTML tags ที่อาจเหลือ
-    content = re.sub(r'<[^>]*>', '', content)
+    # เก็บโค้ดบล็อกไว้ก่อน (```...```)
+    code_blocks = []
+    code_pattern = r'```[\s\S]*?```'
+    
+    def store_code_block(match):
+        code_blocks.append(match.group(0))
+        return f"__CODE_BLOCK_{len(code_blocks)-1}__"
+    
+    content = re.sub(code_pattern, store_code_block, content)
+    
+    # เก็บโค้ดแบบ inline ไว้ก่อน (`...`)
+    inline_codes = []
+    inline_pattern = r'`[^`\n]+`'
+    
+    def store_inline_code(match):
+        inline_codes.append(match.group(0))
+        return f"__INLINE_CODE_{len(inline_codes)-1}__"
+    
+    content = re.sub(inline_pattern, store_inline_code, content)
+    
+    # เก็บตารางไว้ก่อน (รูปแบบ Markdown table)
+    tables = []
+    table_pattern = r'\|[^\n]*\|[\s]*\n\|[-\s:]+\|[\s]*\n(?:\|[^\n]*\|[\s]*\n)+'
+    
+    def store_table(match):
+        tables.append(match.group(0))
+        return f"__TABLE_{len(tables)-1}__"
+    
+    content = re.sub(table_pattern, store_table, content)
+    
+    # ลบ HTML tags ที่เหลือ (ยกเว้นที่อยู่ในโค้ด)
+    content = re.sub(r'<(?!code|pre)[^>]*>', '', content)
     
     # ลบอักขระพิเศษที่ไม่ต้องการ
     content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]', '', content)
     
-    # จัดการช่องว่างและบรรทัดใหม่
-    content = re.sub(r'\n\s*\n', '\n\n', content)  # ลดบรรทัดว่างเกิน
-    content = re.sub(r'[ \t]+', ' ', content)  # ลดช่องว่างเกิน
+    # จัดการช่องว่างและบรรทัดใหม่ (ไม่กระทบกับโค้ดและตาราง)
+    # ลดบรรทัดว่างเกินแต่คงบรรทัดใหม่ปกติไว้
+    content = re.sub(r'\n\s*\n\s*\n+', '\n\n', content)  # ลดบรรทัดว่างเกิน
+    content = re.sub(r'[ \t]+', ' ', content)  # ลดช่องว่างเกิน แต่ไม่แตะบรรทัดใหม่
+    
+    # คืนตารางกลับ
+    for i, table in enumerate(tables):
+        content = content.replace(f"__TABLE_{i}__", table)
+    
+    # คืนโค้ด inline กลับ
+    for i, inline_code in enumerate(inline_codes):
+        content = content.replace(f"__INLINE_CODE_{i}__", inline_code)
+    
+    # คืนโค้ดบล็อกกลับ
+    for i, code_block in enumerate(code_blocks):
+        content = content.replace(f"__CODE_BLOCK_{i}__", code_block)
+    
     content = content.strip()
     
     return content
@@ -315,7 +561,7 @@ def chunk_messages(messages, chunk_size):
     chunks = []
     for i in range(0, len(messages), chunk_size):
         chunk = messages[i:i+chunk_size]
-        ts = datetime.utcnow().isoformat() + "Z"
+        ts = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         conv = [{"role": m["role"], "content": m["content"]} for m in chunk]
         chunks.append({
             "timestamp": ts,
@@ -324,6 +570,13 @@ def chunk_messages(messages, chunk_size):
     return chunks
 
 def save_json(chunks, filename="chat_output.json"):
+    # แก้ไขการ encode บรรทัดใหม่ก่อนบันทึก
+    for chunk in chunks:
+        for conv in chunk.get("conversation", []):
+            if "content" in conv:
+                # แก้ไข \r\n ให้เป็น \n ปกติ
+                conv["content"] = conv["content"].replace('\r\n', '\n').replace('\r', '\n')
+    
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(chunks, f, ensure_ascii=False, indent=2)
     logging.info(f"Saved JSON output: {filename}")
@@ -508,23 +761,83 @@ async def extract_chats(url):
             page = await browser.new_page()
             logging.info(f"Loading share page: {url}")
             await page.goto(url)
-            await page.wait_for_selector('[data-message-author-role]')
-            chat_blocks = await page.query_selector_all('[data-message-author-role]')
-            messages = []            
+            print("กำลังรอให้หน้าเว็บโหลดเสร็จ...")
+            
+            # รอให้หน้าเว็บโหลดเสร็จและรอข้อมูลบทสนทนา
+            try:
+                await page.wait_for_selector('[data-message-author-role]', timeout=30000)
+                print("พบข้อมูลบทสนทนาแล้ว")
+            except:
+                print("รอให้หน้าเว็บโหลดข้อมูลเพิ่มเติม...")
+                await page.wait_for_timeout(5000)
+            
+            # ลองหาด้วย selector หลายแบบ
+            selectors_to_try = [
+                '[data-message-author-role]',
+                '[data-testid*="conversation-turn"]',
+                '.text-message',
+                '[class*="message"]',
+                '[role="article"]'
+            ]
+            
+            chat_blocks = []
+            for selector in selectors_to_try:
+                try:
+                    blocks = await page.query_selector_all(selector)
+                    if blocks:
+                        print(f"พบข้อมูลด้วย selector: {selector} ({len(blocks)} elements)")
+                        chat_blocks = blocks
+                        break
+                except:
+                    continue
+            
+            if not chat_blocks:
+                print("ไม่พบข้อมูลบทสนทนาด้วย selector ปกติ กำลังลองวิธีอื่น...")
+                # ลองดึงข้อมูลจาก script tags
+                script_content = await page.evaluate('''() => {
+                    const scripts = document.querySelectorAll('script');
+                    for (const script of scripts) {
+                        if (script.textContent && script.textContent.includes('conversation')) {
+                            return script.textContent;
+                        }
+                    }
+                    return null;
+                }''')
+                
+                if script_content:
+                    print("พบข้อมูลใน script tags กำลังแยกข้อมูล...")
+                    # ส่งข้อมูลไปให้ fallback function ประมวลผล
+                    await browser.close()
+                    return extract_chats_with_requests(url)
+                else:
+                    print("ไม่พบข้อมูลบทสนทนา")
+                    await browser.close()
+                    return []
+            
+            print(f"พบ {len(chat_blocks)} elements ที่มีข้อมูลบทสนทนา")
+            messages = []
             for block in chat_blocks:
                 role = clean_role(await block.get_attribute("data-message-author-role"))
-                content = (await block.inner_text()).strip()
                 
-                # ทำความสะอาดเนื้อหา
+                # ดึงข้อมูลแบบรักษารูปแบบ (รวมโค้ดและตาราง)
+                content = await extract_formatted_content(page, block)
+                
+                print(f"ดึงข้อความ: [{role}] {content[:100]}...")  # debug
+                
+                # ทำความสะอาดเนื้อหา (แต่คงรูปแบบโค้ดและตารางไว้)
                 content = clean_content(content)
                 
                 if not content:
+                    print(f"ข้อความว่างหลังทำความสะอาด สำหรับ role: {role}")  # debug
                     continue
+                    
                 messages.append({
                     "role": role,
                     "content": content,
                     "timestamp": None
                 })
+                
+            print(f"จำนวนข้อความที่ได้หลังกรอง: {len(messages)}")  # debug
             await browser.close()
             logging.info(f"Extracted {len(messages)} messages")
             return messages
@@ -648,16 +961,18 @@ iface = gr.Interface(
     outputs=[
         gr.Textbox(label="ผลลัพธ์ (Result)", lines=10),
         gr.File(label="ดาวน์โหลดไฟล์ข้อมูล (Download File)")
-    ],
-    title="📥 ChatGPT Dumper",
+    ],    title="📥 ChatGPT Dumper",
     description="""<div style="text-align: center; margin-bottom: 10px">
-                 <h3>Extract and save ChatGPT conversations in multiple formats with Unicode support</h3>
+                 <h3>Extract and save ChatGPT conversations with code blocks and tables preserved</h3>
                  <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
                      <span class="format-badge">📄 TXT</span>
                      <span class="format-badge">📋 JSON</span>
                      <span class="format-badge">📊 CSV</span>
                      <span class="format-badge">🗃️ Parquet</span>
                      <span class="format-badge">🤗 HF Dataset</span>
+                 </div>
+                 <div style="margin: 10px 0; font-size: 14px; color: #666;">
+                     ✅ รองรับโค้ดบล็อก (```code```) | ✅ รองรับตาราง Markdown | ✅ รองรับ Unicode ภาษาไทย
                  </div>
                  </div>""",
     article="""
@@ -682,8 +997,7 @@ iface = gr.Interface(
         <p style="margin-bottom: 0;">สงวนลิขสิทธิ์ © 2025 - All Rights Reserved</p>
         <p style="font-style: italic; margin-top: 15px;">การใช้งานระบบนี้ถือว่าท่านรับทราบและยอมรับเงื่อนไขข้างต้น</p>
     </div>
-    
-    <div style="background-color: #d4edda; color: #155724; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #c3e6cb;">
+      <div style="background-color: #d4edda; color: #155724; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #c3e6cb;">
         <h3 style="color: #155724; margin-top: 0;">📝 วิธีใช้งาน</h3>
         <ol style="margin-left: 20px;">
             <li>วางลิงก์ ChatGPT Share ในช่อง URL (เช่น https://chatgpt.com/share/xxxx)</li>
@@ -692,6 +1006,20 @@ iface = gr.Interface(
             <li>กดปุ่ม Submit เพื่อดึงข้อมูล</li>
             <li>ดาวน์โหลดข้อมูลผ่านปุ่มดาวน์โหลดที่ปรากฏ</li>
         </ol>
+    </div>
+    
+    <div style="background-color: #f8f9fa; color: #495057; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #dee2e6;">
+        <h3 style="color: #495057; margin-top: 0;">🔧 ฟีเจอร์ใหม่: รองรับโค้ดและตาราง</h3>
+        <p><strong>ระบบตอนนี้รองรับการดึงข้อมูลแบบคงรูปแบบ:</strong></p>
+        <ul style="margin-left: 20px;">
+            <li>💻 <strong>โค้ดบล็อก:</strong> รักษารูปแบบ <code>```language</code> และ <code>```</code></li>
+            <li>⌨️ <strong>โค้ด inline:</strong> รักษารูปแบบ <code>`code`</code></li>
+            <li>📊 <strong>ตาราง:</strong> แปลงเป็น Markdown table format</li>
+            <li>📝 <strong>รายการ:</strong> รักษารูปแบบ bullet points และ numbered lists</li>
+            <li>🔗 <strong>ลิงก์:</strong> รักษารูปแบบ <code>[text](url)</code></li>
+            <li>✨ <strong>ตัวหนา/เอียง:</strong> รักษารูปแบบ <code>**bold**</code> และ <code>*italic*</code></li>
+        </ul>
+        <p style="margin-bottom: 0;"><em>เหมาะสำหรับการบันทึกบทสนทนาที่มีโค้ดและข้อมูลเชิงเทคนิค</em></p>
     </div>
     """,
     theme=gr.themes.Soft(
