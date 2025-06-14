@@ -15,6 +15,7 @@ import gradio as gr
 import shutil
 import signal
 import time
+import unicodedata
 
 # ตั้งค่า virtual display สำหรับ Hugging Face Spaces
 is_on_spaces = os.environ.get('SPACE_ID') is not None
@@ -97,12 +98,12 @@ def extract_chats_with_requests(url):
         # หา messages ด้วย regex
         user_matches = re.findall(user_pattern, response.text, re.DOTALL)
         assistant_matches = re.findall(assistant_pattern, response.text, re.DOTALL)
-        
-        # สร้าง messages แบบสลับกัน user และ assistant
+          # สร้าง messages แบบสลับกัน user และ assistant
         for i in range(max(len(user_matches), len(assistant_matches))):
             if i < len(user_matches):
-                # ลบ html tags
+                # ลบ html tags และทำความสะอาด
                 content = re.sub(r'<[^>]*>', '', user_matches[i])
+                content = clean_content(content)
                 if content.strip():
                     messages.append({
                         "role": "user",
@@ -111,8 +112,9 @@ def extract_chats_with_requests(url):
                     })
             
             if i < len(assistant_matches):
-                # ลบ html tags
+                # ลบ html tags และทำความสะอาด
                 content = re.sub(r'<[^>]*>', '', assistant_matches[i])
+                content = clean_content(content)
                 if content.strip():
                     messages.append({
                         "role": "ChatGPT",
@@ -146,11 +148,15 @@ def extract_chats_with_requests(url):
                                             for part in message["content"]["parts"]:
                                                 content += part
                                             
-                                            messages.append({
-                                                "role": role,
-                                                "content": content,
-                                                "timestamp": None
-                                            })
+                                            # ทำความสะอาดเนื้อหา
+                                            content = clean_content(content)
+                                            
+                                            if content.strip():
+                                                messages.append({
+                                                    "role": role,
+                                                    "content": content,
+                                                    "timestamp": None
+                                                })
                 except Exception as json_error:
                     print(f"เกิดข้อผิดพลาดในการแกะข้อมูล JSON: {str(json_error)}")
         
@@ -245,6 +251,65 @@ def clean_role(role):
     if "assistant" in role or "chatgpt" in role:
         return "ChatGPT"
     return role
+
+def clean_emoji(text):
+    """ฟังก์ชันลบ emoji และสัญลักษณ์พิเศษออกจากข้อความ"""
+    if not text:
+        return text
+    
+    # ลบ emoji ด้วย regex pattern
+    emoji_pattern = re.compile("["
+        u"\U0001F600-\U0001F64F"  # emoticons
+        u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+        u"\U0001F680-\U0001F6FF"  # transport & map symbols
+        u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+        u"\U00002500-\U00002BEF"  # chinese char
+        u"\U00002702-\U000027B0"
+        u"\U00002702-\U000027B0"
+        u"\U000024C2-\U0001F251"
+        u"\U0001f926-\U0001f937"
+        u"\U00010000-\U0010ffff"
+        u"\u2640-\u2642" 
+        u"\u2600-\u2B55"
+        u"\u200d"
+        u"\u23cf"
+        u"\u23e9"
+        u"\u231a"
+        u"\ufe0f"  # dingbats
+        u"\u3030"
+        "]+", flags=re.UNICODE)
+    
+    # ลบ emoji
+    cleaned_text = emoji_pattern.sub(r'', text)
+    
+    # ลบช่องว่างเกิน
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    
+    # ลบอักขระควบคุมพิเศษ
+    cleaned_text = ''.join(char for char in cleaned_text if unicodedata.category(char)[0] != 'C' or char in '\n\r\t')
+    
+    return cleaned_text
+
+def clean_content(content):
+    """ทำความสะอาดเนื้อหาข้อความ"""
+    if not content:
+        return content
+    
+    # ลบ emoji
+    content = clean_emoji(content)
+    
+    # ลบ HTML tags ที่อาจเหลือ
+    content = re.sub(r'<[^>]*>', '', content)
+    
+    # ลบอักขระพิเศษที่ไม่ต้องการ
+    content = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x84\x86-\x9f]', '', content)
+    
+    # จัดการช่องว่างและบรรทัดใหม่
+    content = re.sub(r'\n\s*\n', '\n\n', content)  # ลดบรรทัดว่างเกิน
+    content = re.sub(r'[ \t]+', ' ', content)  # ลดช่องว่างเกิน
+    content = content.strip()
+    
+    return content
 
 def chunk_messages(messages, chunk_size):
     chunks = []
@@ -445,10 +510,13 @@ async def extract_chats(url):
             await page.goto(url)
             await page.wait_for_selector('[data-message-author-role]')
             chat_blocks = await page.query_selector_all('[data-message-author-role]')
-            messages = []
-            for block in chat_blocks:
+            messages = []            for block in chat_blocks:
                 role = clean_role(await block.get_attribute("data-message-author-role"))
                 content = (await block.inner_text()).strip()
+                
+                # ทำความสะอาดเนื้อหา
+                content = clean_content(content)
+                
                 if not content:
                     continue
                 messages.append({
@@ -469,7 +537,19 @@ def validate_conversation(messages):
     if not messages:
         logging.warning("No messages found")
         return []
-    cleaned = [m for m in messages if m["role"] in ("user", "ChatGPT") and m["content"].strip()]
+    
+    # ทำความสะอาดข้อความและกรองเฉพาะข้อความที่ถูกต้อง
+    cleaned = []
+    for m in messages:
+        if m["role"] in ("user", "ChatGPT"):
+            content = clean_content(m["content"])
+            if content.strip():
+                cleaned.append({
+                    "role": m["role"],
+                    "content": content,
+                    "timestamp": m.get("timestamp")
+                })
+    
     if not cleaned:
         logging.warning("No valid user/ChatGPT messages after cleaning")
     return cleaned
