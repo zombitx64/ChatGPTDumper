@@ -945,7 +945,7 @@ def sanitize_url(url):
     return url.strip()
 
 iface = gr.Interface(
-    fn=lambda url, format, event=None: gradio_interface(sanitize_url(url), format),
+    fn=lambda url, format, use_fallback=False: gradio_interface(sanitize_url(url), format, use_fallback),
     inputs=[
         gr.Textbox(
             label="ลิงก์ ChatGPT Share URL",
