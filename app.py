@@ -282,19 +282,19 @@ async def extract_formatted_content(page, element):
             const codeBlocks = tempDiv.querySelectorAll('pre code, pre, code');
             codeBlocks.forEach(block => {
                 const isBlock = block.tagName === 'PRE' || block.parentElement?.tagName === 'PRE';
-                const language = block.className.match(/language-(\w+)/) ? 
-                    block.className.match(/language-(\w+)/)[1] : '';
+                const language = block.className.match(/language-([a-zA-Z0-9]+)/) ?
+                    block.className.match(/language-([a-zA-Z0-9]+)/)[1] : '';
                 
                 if (isBlock) {
                     // โค้ดบล็อก
                     const codeText = block.textContent || block.innerText;
-                    block.outerHTML = language ? 
-                        `\n\`\`\`${language}\n${codeText}\n\`\`\`\n` : 
-                        `\n\`\`\`\n${codeText}\n\`\`\`\n`;
+                    block.outerHTML = language ?
+                        '\\n```' + language + '\\n' + codeText + '\\n```\\n' :
+                        '\\n```\\n' + codeText + '\\n```\\n';
                 } else {
                     // โค้ด inline
                     const codeText = block.textContent || block.innerText;
-                    block.outerHTML = `\`${codeText}\``;
+                    block.outerHTML = '`' + codeText + '`';
                 }
             });
             
@@ -938,8 +938,14 @@ def gradio_interface(url, export_format, use_fallback=False):
     except Exception as e:
         return f"เกิดข้อผิดพลาด: {str(e)}", None
 
+def sanitize_url(url):
+    if url is None:
+        return ""
+    # ลบ whitespace และ newline characters
+    return url.strip()
+
 iface = gr.Interface(
-    fn=gradio_interface,
+    fn=lambda url, format, event=None: gradio_interface(sanitize_url(url), format),
     inputs=[
         gr.Textbox(
             label="ลิงก์ ChatGPT Share URL",
@@ -961,67 +967,70 @@ iface = gr.Interface(
     outputs=[
         gr.Textbox(label="ผลลัพธ์ (Result)", lines=10),
         gr.File(label="ดาวน์โหลดไฟล์ข้อมูล (Download File)")
-    ],    title="📥 ChatGPT Dumper",
+    ],    title="ChatGPT Dumper",
     description="""<div style="text-align: center; margin-bottom: 10px">
                  <h3>Extract and save ChatGPT conversations with code blocks and tables preserved</h3>
                  <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
-                     <span class="format-badge">📄 TXT</span>
-                     <span class="format-badge">📋 JSON</span>
-                     <span class="format-badge">📊 CSV</span>
-                     <span class="format-badge">🗃️ Parquet</span>
-                     <span class="format-badge">🤗 HF Dataset</span>
-                 </div>
+                      <span class="format-badge"><i class="fas fa-file-alt"></i> TXT</span>
+                      <span class="format-badge"><i class="fas fa-file-code"></i> JSON</span>
+                      <span class="format-badge"><i class="fas fa-table"></i> CSV</span>
+                      <span class="format-badge"><i class="fas fa-database"></i> Parquet</span>
+                      <span class="format-badge"><i class="fas fa-brain"></i> HF Dataset</span>
+                  </div>
                  <div style="margin: 10px 0; font-size: 14px; color: #666;">
-                     ✅ รองรับโค้ดบล็อก (```code```) | ✅ รองรับตาราง Markdown | ✅ รองรับ Unicode ภาษาไทย
+                     <i class="fas fa-check"></i> รองรับโค้ดบล็อก (```code```) | <i class="fas fa-check"></i> รองรับตาราง Markdown | <i class="fas fa-check"></i> รองรับ Unicode ภาษาไทย
                  </div>
                  </div>""",
-    article="""
-    <div style="background-color: #d1ecf1; color: #0c5460; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #bee5eb;">
-        <h3 style="color: #0c5460; margin-top: 0;">ℹ️ คำแนะนำการแก้ไขปัญหา</h3>
-        <p>หากเกิดข้อผิดพลาด <code>Host system is missing dependencies</code> ให้ทำดังนี้</p>
-        <ol style="margin-left: 20px;">
-            <li>ลองเลือกตัวเลือก "ใช้โหมดสำรอง" เพื่อใช้ระบบสำรองแทน Playwright</li>
-            <li>ระบบสำรองจะใช้ Requests ในการดึงข้อมูลแทน ซึ่งไม่ต้องการ dependencies เพิ่มเติม</li>
-        </ol>
-    </div>
+    article=(
+        "<div style='padding: 20px;'>"
+        "<h1>ChatGPT Conversation Dumper</h1>"
+        "<p>เครื่องมือสำหรับดึงข้อมูลบทสนทนาจาก ChatGPT shared links</p>"
+        "<div style='background-color: #d1ecf1; color: #0c5460; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #bee5eb;'>"
+        "<h3 style='color: #0c5460; margin-top: 0;'><i class='fas fa-info-circle'></i> คำแนะนำการแก้ไขปัญหา</h3>"
+       "<p>หากเกิดข้อผิดพลาด <code>Host system is missing dependencies</code> ให้ทำดังนี้</p>"
+       "<ol style='margin-left: 20px;'>"
+       "<li>ลองเลือกตัวเลือก \"ใช้โหมดสำรอง\" เพื่อใช้ระบบสำรองแทน Playwright</li>"
+       "<li>ระบบสำรองจะใช้ Requests ในการดึงข้อมูลแทน ซึ่งไม่ต้องการ dependencies เพิ่มเติม</li>"
+       "</ol>"
+       "</div>"
 
-    <div style="background-color: #fff3cd; color: #856404; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #ffeeba;">
-        <h3 style="color: #856404; margin-top: 0;">⚠️ คำเตือนเรื่องทรัพย์สินทางปัญญา</h3>
-        <p>ระบบนี้เป็นทรัพย์สินทางปัญญา ห้ามคัดลอก แก้ไข หรือนำไปใช้เพื่อการพาณิชย์โดยไม่ได้รับอนุญาต</p>
-        <ul style="margin-left: 20px;">
-            <li>🚫 ห้ามคัดลอกโค้ด หรือส่วนใดส่วนหนึ่งของระบบ</li>
-            <li>🚫 ห้ามแก้ไขหรือดัดแปลง เพื่อสร้างผลงานใหม่</li>
-            <li>🚫 ห้ามจำหน่าย หรือแจกจ่ายต่อโดยไม่ได้รับอนุญาต</li>
-            <li>✅ อนุญาตให้ใช้งาน เฉพาะเพื่อการทดสอบและเรียนรู้เท่านั้น</li>
-        </ul>
-        <p style="margin-bottom: 0;">สงวนลิขสิทธิ์ © 2025 - All Rights Reserved</p>
-        <p style="font-style: italic; margin-top: 15px;">การใช้งานระบบนี้ถือว่าท่านรับทราบและยอมรับเงื่อนไขข้างต้น</p>
-    </div>
-      <div style="background-color: #d4edda; color: #155724; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #c3e6cb;">
-        <h3 style="color: #155724; margin-top: 0;">📝 วิธีใช้งาน</h3>
-        <ol style="margin-left: 20px;">
-            <li>วางลิงก์ ChatGPT Share ในช่อง URL (เช่น https://chatgpt.com/share/xxxx)</li>
-            <li>เลือกรูปแบบไฟล์ที่ต้องการดาวน์โหลด</li>
-            <li>หากเกิดปัญหา ให้เลือกตัวเลือก "ใช้โหมดสำรอง"</li>
-            <li>กดปุ่ม Submit เพื่อดึงข้อมูล</li>
-            <li>ดาวน์โหลดข้อมูลผ่านปุ่มดาวน์โหลดที่ปรากฏ</li>
-        </ol>
-    </div>
+       "<div style='background-color: #fff3cd; color: #856404; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #ffeeba;'>"
+       "<h3 style='color: #856404; margin-top: 0;'><i class='fas fa-exclamation-triangle'></i> คำเตือนเรื่องทรัพย์สินทางปัญญา</h3>"
+       "<p>ระบบนี้เป็นทรัพย์สินทางปัญญา ห้ามคัดลอก แก้ไข หรือนำไปใช้เพื่อการพาณิชย์โดยไม่ได้รับอนุญาต</p>"
+       "<ul style='margin-left: 20px;'>"
+       "<li><i class='fas fa-ban'></i> ห้ามคัดลอกโค้ด หรือส่วนใดส่วนหนึ่งของระบบ</li>"
+       "<li><i class='fas fa-ban'></i> ห้ามแก้ไขหรือดัดแปลง เพื่อสร้างผลงานใหม่</li>"
+       "<li><i class='fas fa-ban'></i> ห้ามจำหน่าย หรือแจกจ่ายต่อโดยไม่ได้รับอนุญาต</li>"
+       "<li><i class='fas fa-check'></i> อนุญาตให้ใช้งาน เฉพาะเพื่อการทดสอบและเรียนรู้เท่านั้น</li>"
+       "</ul>"
+       "<p style='margin-bottom: 0;'>สงวนลิขสิทธิ์ © 2025 - All Rights Reserved</p>"
+       "<p style='font-style: italic; margin-top: 15px;'>การใช้งานระบบนี้ถือว่าท่านรับทราบและยอมรับเงื่อนไขข้างต้น</p>"
+       "</div>"
+       "<div style='background-color: #d4edda; color: #155724; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #c3e6cb;'>"
+       "<h3 style='color: #155724; margin-top: 0;'><i class='fas fa-book'></i> วิธีใช้งาน</h3>"
+       "<ol style='margin-left: 20px;'>"
+       "<li>วางลิงก์ ChatGPT Share ในช่อง URL (เช่น https://chatgpt.com/share/xxxx)</li>"
+       "<li>เลือกรูปแบบไฟล์ที่ต้องการดาวน์โหลด</li>"
+       "<li>หากเกิดปัญหา ให้เลือกตัวเลือก \"ใช้โหมดสำรอง\"</li>"
+       "<li>กดปุ่ม Submit เพื่อดึงข้อมูล</li>"
+       "<li>ดาวน์โหลดข้อมูลผ่านปุ่มดาวน์โหลดที่ปรากฏ</li>"
+       "</ol>"
+       "</div>"
     
-    <div style="background-color: #f8f9fa; color: #495057; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #dee2e6;">
-        <h3 style="color: #495057; margin-top: 0;">🔧 ฟีเจอร์ใหม่: รองรับโค้ดและตาราง</h3>
-        <p><strong>ระบบตอนนี้รองรับการดึงข้อมูลแบบคงรูปแบบ:</strong></p>
-        <ul style="margin-left: 20px;">
-            <li>💻 <strong>โค้ดบล็อก:</strong> รักษารูปแบบ <code>```language</code> และ <code>```</code></li>
-            <li>⌨️ <strong>โค้ด inline:</strong> รักษารูปแบบ <code>`code`</code></li>
-            <li>📊 <strong>ตาราง:</strong> แปลงเป็น Markdown table format</li>
-            <li>📝 <strong>รายการ:</strong> รักษารูปแบบ bullet points และ numbered lists</li>
-            <li>🔗 <strong>ลิงก์:</strong> รักษารูปแบบ <code>[text](url)</code></li>
-            <li>✨ <strong>ตัวหนา/เอียง:</strong> รักษารูปแบบ <code>**bold**</code> และ <code>*italic*</code></li>
-        </ul>
-        <p style="margin-bottom: 0;"><em>เหมาะสำหรับการบันทึกบทสนทนาที่มีโค้ดและข้อมูลเชิงเทคนิค</em></p>
-    </div>
-    """,
+       "<div style='background-color: #f8f9fa; color: #495057; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #dee2e6;'>"
+       "<h3 style='color: #495057; margin-top: 0;'><i class='fas fa-wrench'></i> ฟีเจอร์ใหม่: รองรับโค้ดและตาราง</h3>"
+       "<p><strong>ระบบตอนนี้รองรับการดึงข้อมูลแบบคงรูปแบบ:</strong></p>"
+       "<ul style='margin-left: 20px;'>"
+       "<li><i class='fas fa-laptop-code'></i> <strong>โค้ดบล็อก:</strong> รักษารูปแบบ <code>```language</code> และ <code>```</code></li>"
+       "<li><i class='fas fa-keyboard'></i> <strong>โค้ด inline:</strong> รักษารูปแบบ <code>`code`</code></li>"
+       "<li><i class='fas fa-table'></i> <strong>ตาราง:</strong> แปลงเป็น Markdown table format</li>"
+       "<li><i class='fas fa-list'></i> <strong>รายการ:</strong> รักษารูปแบบ bullet points และ numbered lists</li>"
+       "<li><i class='fas fa-link'></i> <strong>ลิงก์:</strong> รักษารูปแบบ <code>[text](url)</code></li>"
+       "<li><i class='fas fa-star'></i> <strong>ตัวหนา/เอียง:</strong> รักษารูปแบบ <code>**bold**</code> และ <code>*italic*</code></li>"
+       "</ul>"
+       "<p style='margin-bottom: 0;'><em>เหมาะสำหรับการบันทึกบทสนทนาที่มีโค้ดและข้อมูลเชิงเทคนิค</em></p>"
+       "</div>"
+       "</div>"),
     theme=gr.themes.Soft(
         primary_hue="blue",
         secondary_hue="orange",
@@ -1100,8 +1109,7 @@ if __name__ == "__main__":
                 server_name="0.0.0.0",
                 server_port=7860,
                 share=False,
-                ssl_verify=False,
-                ssr_mode=True
+                ssl_verify=False
             )
         else:
             # บนเครื่องโลคอล
