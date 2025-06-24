@@ -16,6 +16,7 @@ import shutil
 import signal
 import time
 import unicodedata
+from langdetect import detect, LangDetectException
 
 # ตั้งค่า virtual display สำหรับ Hugging Face Spaces
 is_on_spaces = os.environ.get('SPACE_ID') is not None
@@ -622,36 +623,43 @@ def save_custom_format(messages, filename="chat_output_custom.json"):
     logging.info(f"Saved custom format output: {filename}")
 
 def save_grouped_custom_format(messages, filename="chat_output_grouped.json"):
-    """บันทึกไฟล์ในรูปแบบ grouped custom ที่มี id, conversations, type, language, source, class โดยดึง language, source จาก message ถ้ามี"""
+    """บันทึกไฟล์ในรูปแบบ grouped custom ที่มี id, conversations, type, language, source, class โดยตรวจจับภาษาอัตโนมัติ"""
     grouped = []
     i = 0
     n = len(messages)
     while i < n:
         conversations = []
-        # human
         lang = None
         src = None
+        # human
         if i < n and messages[i]["role"].lower() in ("user", "human"):
             conversations.append({
                 "from": "human",
                 "value": messages[i]["content"]
             })
-            lang = messages[i].get("language")
+            lang_text = messages[i]["content"]
             src = messages[i].get("source")
             i += 1
+        else:
+            lang_text = None
         # gpt
         if i < n and messages[i]["role"].lower() in ("chatgpt", "gpt", "assistant"):
             conversations.append({
                 "from": "gpt",
                 "value": messages[i]["content"]
             })
-            if not lang:
-                lang = messages[i].get("language")
+            if not lang_text:
+                lang_text = messages[i]["content"]
             if not src:
                 src = messages[i].get("source")
             i += 1
-        # fallback ถ้าไม่มีข้อมูล
-        language = lang if lang else "unknown"
+        # ตรวจจับภาษาอัตโนมัติ
+        language = "unknown"
+        if lang_text:
+            try:
+                language = detect(lang_text)
+            except LangDetectException:
+                language = "unknown"
         source = src if src else "unknown"
         if conversations:
             grouped.append({
