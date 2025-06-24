@@ -602,6 +602,59 @@ def save_hf_dataset(messages, filename="chat_output_hf"):
     ds.save_to_disk(filename)
     logging.info(f"Saved Hugging Face Dataset: {filename}")
 
+def save_custom_format(messages, filename="chat_output_custom.json"):
+    """บันทึกไฟล์ในรูปแบบ custom ที่มี key 'from' และ 'value'"""
+    custom_data = []
+    for m in messages:
+        role = m["role"].lower()
+        if role == "user":
+            from_role = "human"
+        elif role == "chatgpt":
+            from_role = "gpt"
+        else:
+            from_role = role
+        custom_data.append({
+            "from": from_role,
+            "value": m["content"]
+        })
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(custom_data, f, ensure_ascii=False, indent=2)
+    logging.info(f"Saved custom format output: {filename}")
+
+def save_grouped_custom_format(messages, filename="chat_output_grouped.json"):
+    """บันทึกไฟล์ในรูปแบบ grouped custom ที่มี id, conversations, type, language, source, class"""
+    grouped = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        conversations = []
+        # human
+        if i < n and messages[i]["role"].lower() in ("user", "human"):
+            conversations.append({
+                "from": "human",
+                "value": messages[i]["content"]
+            })
+            i += 1
+        # gpt
+        if i < n and messages[i]["role"].lower() in ("chatgpt", "gpt", "assistant"):
+            conversations.append({
+                "from": "gpt",
+                "value": messages[i]["content"]
+            })
+            i += 1
+        if conversations:
+            grouped.append({
+                "id": len(grouped),
+                "conversations": conversations,
+                "type": "general",
+                "language": "en",
+                "source": "general_en",
+                "class": "major"
+            })
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(grouped, f, ensure_ascii=False, indent=4)
+    logging.info(f"Saved grouped custom format output: {filename}")
+
 async def extract_chats(url):
     global USE_FALLBACK
     
@@ -906,6 +959,12 @@ async def main(url, export_format=None):
         filename = "chat_output_hf"
         save_hf_dataset(messages, filename)
         filename = None  # Folder, not file
+    elif fmt == "custom":
+        filename = "chat_output_custom.json"
+        save_custom_format(messages, filename)
+    elif fmt == "grouped":
+        filename = "chat_output_grouped.json"
+        save_grouped_custom_format(messages, filename)
     else:
         logging.error("Unknown output format")
         
@@ -954,7 +1013,7 @@ iface = gr.Interface(
             lines=1
         ),
         gr.Radio(
-            choices=["txt", "json", "csv", "parquet", "hf"],
+            choices=["txt", "json", "csv", "parquet", "hf", "custom", "grouped"],
             label="เลือกรูปแบบการส่งออก (Export Format)",
             info="เลือกไฟล์ที่ต้องการบันทึก",
             value="json"
@@ -967,7 +1026,8 @@ iface = gr.Interface(
     outputs=[
         gr.Textbox(label="ผลลัพธ์ (Result)", lines=10),
         gr.File(label="ดาวน์โหลดไฟล์ข้อมูล (Download File)")
-    ],    title="ChatGPT Dumper",
+    ],
+    title="ChatGPT Dumper",
     description="""<div style="text-align: center; margin-bottom: 10px">
                  <h3>Extract and save ChatGPT conversations with code blocks and tables preserved</h3>
                  <div style="display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 10px 0;">
