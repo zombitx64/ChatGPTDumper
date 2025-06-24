@@ -622,18 +622,22 @@ def save_custom_format(messages, filename="chat_output_custom.json"):
     logging.info(f"Saved custom format output: {filename}")
 
 def save_grouped_custom_format(messages, filename="chat_output_grouped.json"):
-    """บันทึกไฟล์ในรูปแบบ grouped custom ที่มี id, conversations, type, language, source, class"""
+    """บันทึกไฟล์ในรูปแบบ grouped custom ที่มี id, conversations, type, language, source, class โดยดึง language, source จาก message ถ้ามี"""
     grouped = []
     i = 0
     n = len(messages)
     while i < n:
         conversations = []
         # human
+        lang = None
+        src = None
         if i < n and messages[i]["role"].lower() in ("user", "human"):
             conversations.append({
                 "from": "human",
                 "value": messages[i]["content"]
             })
+            lang = messages[i].get("language")
+            src = messages[i].get("source")
             i += 1
         # gpt
         if i < n and messages[i]["role"].lower() in ("chatgpt", "gpt", "assistant"):
@@ -641,14 +645,21 @@ def save_grouped_custom_format(messages, filename="chat_output_grouped.json"):
                 "from": "gpt",
                 "value": messages[i]["content"]
             })
+            if not lang:
+                lang = messages[i].get("language")
+            if not src:
+                src = messages[i].get("source")
             i += 1
+        # fallback ถ้าไม่มีข้อมูล
+        language = lang if lang else "unknown"
+        source = src if src else "unknown"
         if conversations:
             grouped.append({
                 "id": len(grouped),
                 "conversations": conversations,
                 "type": "general",
-                "language": "en",
-                "source": "general_en",
+                "language": language,
+                "source": source,
                 "class": "major"
             })
     with open(filename, "w", encoding="utf-8") as f:
